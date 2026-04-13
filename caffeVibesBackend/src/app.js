@@ -9,7 +9,7 @@ const server = createServer(app)
 
 const io = new Server(server, {
     cors: {
-        origin: process.env.CORS_ORIGIN === "*" ? true : process.env.CORS_ORIGIN,
+        origin: "https://caffevibes.vercel.app",
         credentials: true
     }
 })
@@ -28,7 +28,7 @@ io.on("connection", (socket) => {
 })
 
 app.use(cors({
-    origin: process.env.CORS_ORIGIN === "*" ? true : process.env.CORS_ORIGIN,
+    origin: "https://caffevibes.vercel.app",
     credentials: true
 }))
 
