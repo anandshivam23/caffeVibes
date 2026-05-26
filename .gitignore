@@ -30,3 +30,9 @@ build/
 *.njsproj
 *.sln
 *.sw?
+
+# Backend temp uploads (user-uploaded files, not for tracking)
+caffeVibesBackend/public/temp/
+
+# PWA / service worker source maps
+*.map

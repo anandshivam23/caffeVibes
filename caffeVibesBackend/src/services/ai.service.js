@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { ApiError } from "../utils/ApiError.js";
 
 const client = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY,
+  apiKey: process.env.OPENROUTER_API_KEY || "dummy",
   baseURL: "https://openrouter.ai/api/v1",
 });
 

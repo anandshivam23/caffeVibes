@@ -6,7 +6,9 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const { currentUser } = useAuth();
   useEffect(() => {
-    const newSocket = io('https://vibes-backend-af8b.onrender.com', {
+    const newSocket = io(import.meta.env.DEV
+      ? 'http://localhost:8000'
+      : 'https://vibes-backend-af8b.onrender.com', {
       withCredentials: true,
     });
     setSocket(newSocket);

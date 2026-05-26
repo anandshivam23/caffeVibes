@@ -193,17 +193,23 @@ const deleteTweet = asyncHandler(async (req, res) => {
 });
 
 const getAllTweets = asyncHandler(async (req, res) => {
-    const { type = 'tweet' } = req.query;
+    const { type = 'tweet', query = "" } = req.query;
+
+    const matchStage = {
+        type: type,
+        $or: [
+            { parentTweet: null },
+            { parentTweet: { $exists: false } }
+        ]
+    };
+
+    if (query) {
+        matchStage.content = { $regex: query, $options: "i" };
+    }
 
     const aggregatePipeline = [
         {
-            $match: {
-                type: type,
-                $or: [
-                    { parentTweet: null },
-                    { parentTweet: { $exists: false } }
-                ]
-            }
+            $match: matchStage
         },
         {
             $sort: { createdAt: -1 }

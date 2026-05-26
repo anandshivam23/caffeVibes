@@ -16,6 +16,12 @@ export default function TweetModal({ isOpen, onClose, onSuccess }) {
     try {
       const res = await api.post('/tweets', { content, type });
       toast.success(`${type === 'joke' ? 'Joke' : 'Tweet'} posted!`);
+      
+      // Trigger First Post celebration event
+      window.dispatchEvent(new CustomEvent('caffevibes-milestone-reached', {
+        detail: { milestone: 'first-post', title: 'First Post Milestone Unlocked! 📝' }
+      }));
+
       setContent('');
       setType('tweet');
       onSuccess?.(res.data.data);

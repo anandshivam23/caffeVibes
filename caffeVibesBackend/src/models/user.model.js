@@ -44,6 +44,13 @@ const userSchema = new Schema(
         },
         refreshToken: {
             type: String
+        },
+        streak: {
+            type: Number,
+            default: 0
+        },
+        lastLoginDate: {
+            type: Date
         }
 
     },

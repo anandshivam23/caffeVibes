@@ -239,9 +239,40 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 })
 
 const getCurrentUser = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id).select("-password");
+    if (user) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (!user.lastLoginDate) {
+            user.streak = 1;
+            user.lastLoginDate = today;
+            await user.save({ validateBeforeSave: false });
+        } else {
+            const lastLogin = new Date(user.lastLoginDate);
+            lastLogin.setHours(0, 0, 0, 0);
+
+            const diffTime = today - lastLogin;
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 1) {
+                user.streak += 1;
+                user.lastLoginDate = today;
+                await user.save({ validateBeforeSave: false });
+            } else if (diffDays > 1) {
+                user.streak = 1;
+                user.lastLoginDate = today;
+                await user.save({ validateBeforeSave: false });
+            }
+        }
+        return res
+            .status(200)
+            .json(new ApiResponse(200, user, "User fetched successfully"));
+    }
+
     return res
         .status(200)
-        .json(new ApiResponse(200, req.user, "User fetched successfully"))
+        .json(new ApiResponse(200, req.user, "User fetched successfully"));
 })
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -350,7 +381,8 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
                         then: true,
                         else: false
                     }
-                }
+                },
+                watchHistoryCount: { $size: { $ifNull: ["$watchHistory", []] } }
             }
         },
         {
@@ -362,7 +394,9 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
                 isSubscribed: 1,
                 avatar: 1,
                 coverImage: 1,
-                email: 1
+                email: 1,
+                streak: 1,
+                watchHistoryCount: 1
             }
         }
     ])

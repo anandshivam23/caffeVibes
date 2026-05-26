@@ -3,7 +3,9 @@ const authEventListeners = [];
 export const onAuthFailure = (fn) => authEventListeners.push(fn);
 export const emitAuthFailure = () => authEventListeners.forEach((fn) => fn());
 const api = axios.create({
-  baseURL: 'https://vibes-backend-af8b.onrender.com/api/v1',
+  baseURL: import.meta.env.DEV
+    ? 'http://localhost:8000/api/v1'
+    : 'https://vibes-backend-af8b.onrender.com/api/v1',
   withCredentials: true,
 });
 let isRefreshing = false;

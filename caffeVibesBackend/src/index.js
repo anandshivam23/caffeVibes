@@ -16,3 +16,4 @@ connectDB()
 .catch((err) => {
     console.log("MONGO db connection failed !!! ", err);
 })
+// Trigger nodemon restart after env fix

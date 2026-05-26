@@ -54,7 +54,7 @@ const toggleSubscription = asyncHandler(async (req, res) => {
 })
 
 const getUserChannelSubscribers = asyncHandler(async (req, res) => {
-    const { channelId } = req.params;    
+    const channelId = req.params.channelId || req.params.subscriberId;    
 
     if (!isValidObjectId(channelId)) {
         throw new ApiError(400, "Invalid Channel Id")
