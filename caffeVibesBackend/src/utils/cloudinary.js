@@ -10,6 +10,20 @@ cloudinary.config({
 const uploadOnCloudinary = async (localFilePath) => {
     try {
         if (!localFilePath) return null
+        
+        // Offline / Local Development Fallback if credentials are missing
+        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+            console.log("Cloudinary credentials missing, falling back to local file serving.");
+            const urlPath = localFilePath.replace(/\\/g, '/').replace(/^public\//, '').replace(/^\.\/public\//, '');
+            const localUrl = `http://localhost:8000/${urlPath}`;
+            console.log("Mock uploaded local URL:", localUrl);
+            return {
+                url: localUrl,
+                secure_url: localUrl,
+                public_id: "local-dev-placeholder"
+            };
+        }
+
         const response = await cloudinary.uploader.upload(localFilePath, {
             resource_type: "auto"
         })
@@ -18,8 +32,21 @@ const uploadOnCloudinary = async (localFilePath) => {
         return response;
 
     } catch (error) {
-        fs.unlinkSync(localFilePath) 
-        return null;
+        console.error("Cloudinary upload failed, falling back to local file serving:", error);
+        try {
+            const urlPath = localFilePath.replace(/\\/g, '/').replace(/^public\//, '').replace(/^\.\/public\//, '');
+            const localUrl = `http://localhost:8000/${urlPath}`;
+            return {
+                url: localUrl,
+                secure_url: localUrl,
+                public_id: "local-dev-placeholder"
+            };
+        } catch (innerErr) {
+            if (fs.existsSync(localFilePath)) {
+                fs.unlinkSync(localFilePath);
+            }
+            return null;
+        }
     }
 }
 

@@ -9,7 +9,7 @@ const server = createServer(app)
 
 const io = new Server(server, {
     cors: {
-        origin: "https://caffevibes.vercel.app",
+        origin: process.env.CORS_ORIGIN || "http://localhost:5173",
         credentials: true,
         methods: ["GET", "POST"]
     }
@@ -29,14 +29,14 @@ io.on("connection", (socket) => {
 })
 
 const corsOptions = {
-    origin: "https://caffevibes.vercel.app",
+    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
 }
 
 app.use(cors(corsOptions))
-app.options("*", cors(corsOptions))
+app.options(/.*/, cors(corsOptions))
 
 app.use(express.json({limit: "16kb"}))
 app.use(express.urlencoded({extended: true, limit: "16kb"}))

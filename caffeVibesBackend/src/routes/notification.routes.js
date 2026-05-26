@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { 
     getUserNotifications, 
     markNotificationAsRead, 
-    clearNotifications 
+    clearNotifications,
+    markAllNotificationsAsRead,
+    deleteNotification
 } from "../controllers/notification.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
@@ -11,7 +13,9 @@ const router = Router();
 router.use(verifyJWT);
 
 router.route("/").get(getUserNotifications);
-router.route("/:notificationId/read").patch(markNotificationAsRead);
+router.route("/read-all").patch(markAllNotificationsAsRead);
 router.route("/clear").delete(clearNotifications);
+router.route("/:notificationId").delete(deleteNotification);
+router.route("/:notificationId/read").patch(markNotificationAsRead);
 
 export default router;

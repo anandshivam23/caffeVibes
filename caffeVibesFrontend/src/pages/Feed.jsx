@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import VideoCard from '../components/VideoCard';
 import TweetCard from '../components/TweetCard';
+import SkeletonLoader from '../components/SkeletonLoader';
 import EmptyState from '../components/EmptyState';
 import api from '../api/axios';
 import { toast } from 'react-hot-toast';
@@ -80,12 +81,19 @@ export default function Feed() {
         }
       }
       setItems(fetchedContent);
+      localStorage.setItem('caffevibes-cached-feed', JSON.stringify(fetchedContent));
     } catch (error) {
       if (error?.response?.status === 401 || error?.response?.status === 404) {
         setItems([]);
       } else {
-        setIsError(true);
-        toast.error("Could not load content.");
+        const cached = localStorage.getItem('caffevibes-cached-feed');
+        if (cached) {
+          setItems(JSON.parse(cached));
+          toast.success("Loaded cached feeds offline! ☕", { icon: '📝' });
+        } else {
+          setIsError(true);
+          toast.error("Could not load content.");
+        }
       }
     } finally {
       setIsLoading(false);
@@ -181,6 +189,12 @@ export default function Feed() {
       await api.post('/tweets', { content: newPostContent, type });
       setNewPostContent('');
       toast.success(`${type === 'joke' ? 'Joke' : 'Tweet'} posted!`);
+      
+      // Trigger First Post celebration event
+      window.dispatchEvent(new CustomEvent('caffevibes-milestone-reached', {
+        detail: { milestone: 'first-post', title: 'First Post Milestone Unlocked! 📝' }
+      }));
+
       fetchContent();
     } catch (err) {
       toast.error("Failed to post. Please try again.");
@@ -298,9 +312,11 @@ export default function Feed() {
               </div>
             )}
             {isLoading ? (
-              <div className="flex items-center justify-center py-20">
-                <Loader2 size={40} className="animate-spin text-primary/40" />
-              </div>
+              <SkeletonLoader 
+                variant={(isLikedPage || isDislikedPage || activeTab === 'Videos') ? 'video' : 'tweet'} 
+                count={6}
+                compact={(isLikedPage || isDislikedPage || activeTab === 'Videos')}
+              />
             ) : isError ? (
               <EmptyState type="error" />
             ) : items.length > 0 ? (

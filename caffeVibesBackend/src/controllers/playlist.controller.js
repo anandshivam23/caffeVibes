@@ -297,6 +297,26 @@ const updatePlaylist = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, playlist, "Playlist updated successfully"));
 })
 
+const searchPlaylists = asyncHandler(async (req, res) => {
+    const { query = "" } = req.query;
+    const matchQuery = {};
+    if (query) {
+        matchQuery.name = { $regex: query, $options: "i" };
+    }
+    matchQuery.isPublic = true;
+
+    const playlists = await Playlist.find(matchQuery)
+        .populate({
+            path: "videos",
+            select: "thumbnail"
+        })
+        .populate("owner", "username fullName avatar");
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, playlists, "Playlists fetched successfully"));
+});
+
 export {
     createPlaylist,
     getUserPlaylists,
@@ -304,5 +324,6 @@ export {
     addVideoToPlaylist,
     removeVideoFromPlaylist,
     deletePlaylist,
-    updatePlaylist
+    updatePlaylist,
+    searchPlaylists
 }

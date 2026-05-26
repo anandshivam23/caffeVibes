@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ThumbsUp, ThumbsDown, Share2, MoreHorizontal, BookmarkPlus, Loader2, Pencil, Trash2, X, Check, Send, Reply, CornerDownRight } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Share2, MoreHorizontal, BookmarkPlus, Loader2, Pencil, Trash2, X, Check, Send, Reply, CornerDownRight, Play, Pause, Maximize, Minimize, Settings, ExternalLink, Volume2, Volume1, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import SkeletonLoader from '../components/SkeletonLoader';
 import EmptyState from '../components/EmptyState';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
@@ -27,12 +28,27 @@ const CommentItem = ({ comment, depth = 0, onReply, onDelete, onUpdate, allComme
   );
   const handleLike = async () => {
     if (!currentUser) return toast.error("Login to like");
+    const originalLiked = isLiked;
+    setIsLiked(!isLiked);
+    setLikesCount(prev => originalLiked ? Math.max(0, prev - 1) : prev + 1);
+
+    if (!navigator.onLine) {
+      const queue = JSON.parse(localStorage.getItem('caffevibes-offline-actions') || '[]');
+      queue.push({
+        url: `/likes/toggle/c/${comment._id}`,
+        method: 'POST',
+        body: {}
+      });
+      localStorage.setItem('caffevibes-offline-actions', JSON.stringify(queue));
+      toast.success("Comment liked offline! Queued for auto-sync ☕", { icon: '📝' });
+      return;
+    }
+
     try {
-      const originalLiked = isLiked;
-      setIsLiked(!isLiked);
-      setLikesCount(prev => originalLiked ? Math.max(0, prev - 1) : prev + 1);
       await api.post(`/likes/toggle/c/${comment._id}`);
     } catch (e) {
+      setIsLiked(originalLiked);
+      setLikesCount(comment.likesCount || 0);
       toast.error("Failed to toggle like");
     }
   };
@@ -190,6 +206,297 @@ export default function VideoPlayer() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeletingVideo, setIsDeletingVideo] = useState(false);
   const isVideoOwner = currentUser && video && currentUser._id === video.owner?._id;
+
+  const videoRef = useRef(null);
+  const playerContainerRef = useRef(null);
+  const controlsTimeoutRef = useRef(null);
+  const shortcutOverlayTimeoutRef = useRef(null);
+
+  // Custom Controls State
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(parseFloat(localStorage.getItem('caffevibes-volume') || '1'));
+  const [isMuted, setIsMuted] = useState(localStorage.getItem('caffevibes-muted') === 'true');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeQuality, setActiveQuality] = useState(localStorage.getItem('caffevibes-quality') || 'Auto');
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [hoverChapter, setHoverChapter] = useState(null);
+
+  // Time formatter (MM:SS or HH:MM:SS)
+  const formatTime = (timeInSeconds) => {
+    if (isNaN(timeInSeconds)) return '0:00';
+    const hrs = Math.floor(timeInSeconds / 3600);
+    const mins = Math.floor((timeInSeconds % 3600) / 60);
+    const secs = Math.floor(timeInSeconds % 60);
+    
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Chapter Parser
+  const parseChapters = (desc, dur) => {
+    if (!desc || !dur) return [];
+    const lines = desc.split('\n');
+    const parsed = [];
+    const timeRegex = /(?:(\d{1,2}):)?(\d{2}):(\d{2})/;
+    
+    for (const line of lines) {
+      const match = line.match(timeRegex);
+      if (match) {
+        const hrs = match[1] ? parseInt(match[1], 10) : 0;
+        const mins = parseInt(match[2], 10);
+        const secs = parseInt(match[3], 10);
+        const seconds = hrs * 3600 + mins * 60 + secs;
+        
+        if (seconds < dur) {
+          const title = line.replace(match[0], '').replace(/^[-\s:|()\[\]]+|[-\s:|()\[\]]+$/g, '').trim();
+          parsed.push({
+            seconds,
+            title: title || `Chapter at ${match[0]}`
+          });
+        }
+      }
+    }
+    
+    parsed.sort((a, b) => a.seconds - b.seconds);
+    return parsed.filter((ch, idx, self) => self.findIndex(t => t.seconds === ch.seconds) === idx);
+  };
+
+  const chapters = video ? parseChapters(video.description, duration) : [];
+  const currentChapter = chapters.length > 0 
+    ? [...chapters].reverse().find(ch => currentTime >= ch.seconds)
+    : null;
+
+  // Custom Controls Handlers
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      videoRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {});
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (!videoRef.current) return;
+    setCurrentTime(videoRef.current.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    if (!videoRef.current) return;
+    setDuration(videoRef.current.duration);
+  };
+
+  const handleTimelineClick = (e) => {
+    if (!videoRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    videoRef.current.currentTime = pos * duration;
+  };
+
+  const handleTimelineHover = (e) => {
+    if (!duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    const hoverSecs = pos * duration;
+    
+    // Find chapter for this hovered percent
+    const hoverPercent = pos * 100;
+    const ch = [...chapters].reverse().find(c => hoverSecs >= c.seconds) || chapters[0];
+    setHoverChapter({
+      seconds: hoverSecs,
+      percent: hoverPercent,
+      title: ch ? ch.title : 'Vibe Timeline'
+    });
+  };
+
+  const jumpToChapter = (secs) => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = secs;
+    if (!isPlaying) {
+      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+    }
+  };
+
+  const toggleMute = () => {
+    if (!videoRef.current) return;
+    const nextMuted = !isMuted;
+    videoRef.current.muted = nextMuted;
+    setIsMuted(nextMuted);
+    localStorage.setItem('caffevibes-muted', String(nextMuted));
+  };
+
+  const handleVolumeChange = (e) => {
+    if (!videoRef.current) return;
+    const val = parseFloat(e.target.value);
+    videoRef.current.volume = val;
+    setVolume(val);
+    if (val > 0 && isMuted) {
+      videoRef.current.muted = false;
+      setIsMuted(false);
+      localStorage.setItem('caffevibes-muted', 'false');
+    }
+    localStorage.setItem('caffevibes-volume', String(val));
+  };
+
+  const toggleFullscreen = () => {
+    if (!playerContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      playerContainerRef.current.requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch(() => {});
+    } else {
+      document.exitFullscreen()
+        .then(() => setIsFullscreen(false));
+    }
+  };
+
+  const togglePiP = async () => {
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        if (document.pictureInPictureEnabled || videoRef.current.requestPictureInPicture) {
+          await videoRef.current.requestPictureInPicture();
+        } else {
+          toast.error("Picture-in-Picture not supported by this browser.");
+        }
+      }
+    } catch (e) {
+      toast.error("Picture-in-Picture failed to open.");
+    }
+  };
+
+  const changeQuality = (q) => {
+    setActiveQuality(q);
+    localStorage.setItem('caffevibes-quality', q);
+    setShowQualityMenu(false);
+    toast.success(`Quality set to ${q}`);
+  };
+
+  // Keyboard shortcut triggers
+  const triggerShortcutsOverlay = (forceShow = false) => {
+    setShowShortcuts(true);
+    if (shortcutOverlayTimeoutRef.current) clearTimeout(shortcutOverlayTimeoutRef.current);
+    
+    if (!forceShow) {
+      shortcutOverlayTimeoutRef.current = setTimeout(() => {
+        setShowShortcuts(false);
+      }, 3000);
+    }
+  };
+
+  const seekRelative = (secs) => {
+    if (!videoRef.current) return;
+    let nextTime = videoRef.current.currentTime + secs;
+    if (nextTime < 0) nextTime = 0;
+    if (nextTime > duration) nextTime = duration;
+    videoRef.current.currentTime = nextTime;
+  };
+
+  const changeVolumeRelative = (delta) => {
+    let nextVolume = volume + delta;
+    if (nextVolume < 0) nextVolume = 0;
+    if (nextVolume > 1) nextVolume = 1;
+    if (videoRef.current) {
+      videoRef.current.volume = nextVolume;
+      videoRef.current.muted = nextVolume === 0;
+    }
+    setVolume(nextVolume);
+    setIsMuted(nextVolume === 0);
+    localStorage.setItem('caffevibes-volume', String(nextVolume));
+  };
+
+  // Autohide controls logic
+  const handleMouseMoveControls = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (isPlaying) {
+        setShowControls(false);
+      }
+    }, 2500);
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = isMuted;
+    }
+  }, [volume, isMuted, video]);
+
+  // Handle Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (
+        document.activeElement.tagName === 'INPUT' || 
+        document.activeElement.tagName === 'TEXTAREA' || 
+        document.activeElement.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      
+      if (key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+        triggerShortcutsOverlay();
+      } else if (key === 'm') {
+        e.preventDefault();
+        toggleMute();
+        triggerShortcutsOverlay();
+      } else if (key === 'f') {
+        e.preventDefault();
+        toggleFullscreen();
+        triggerShortcutsOverlay();
+      } else if (key === 'arrowleft') {
+        e.preventDefault();
+        seekRelative(-5);
+        triggerShortcutsOverlay();
+      } else if (key === 'arrowright') {
+        e.preventDefault();
+        seekRelative(5);
+        triggerShortcutsOverlay();
+      } else if (key === 'arrowup') {
+        e.preventDefault();
+        changeVolumeRelative(0.1);
+        triggerShortcutsOverlay();
+      } else if (key === 'arrowdown') {
+        e.preventDefault();
+        changeVolumeRelative(-0.1);
+        triggerShortcutsOverlay();
+      } else if (e.key === '?' || key === 'k') {
+        e.preventDefault();
+        triggerShortcutsOverlay(true);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      if (shortcutOverlayTimeoutRef.current) clearTimeout(shortcutOverlayTimeoutRef.current);
+    };
+  }, [isPlaying, volume, isMuted, isFullscreen, duration, currentTime]);
+
   useEffect(() => {
     const handler = (e) => {
       if (videoMenuRef.current && !videoMenuRef.current.contains(e.target)) {
@@ -247,6 +554,31 @@ export default function VideoPlayer() {
     const text = content || newComment;
     if (!currentUser) return toast.error('Login to comment');
     if (!text.trim()) return;
+
+    if (!navigator.onLine) {
+      const offlineComment = {
+        _id: `offline-${Date.now()}`,
+        content: text,
+        parentComment,
+        createdAt: new Date().toISOString(),
+        commentor: currentUser,
+        owner: currentUser
+      };
+      
+      setComments(prev => [offlineComment, ...prev]);
+      if (!parentComment) setNewComment('');
+
+      const queue = JSON.parse(localStorage.getItem('caffevibes-offline-actions') || '[]');
+      queue.push({
+        url: `/comments/${video._id}`,
+        method: 'POST',
+        body: { content: text, parentComment }
+      });
+      localStorage.setItem('caffevibes-offline-actions', JSON.stringify(queue));
+      toast.success("Comment posted offline! Queued for auto-sync ☕", { icon: '📝' });
+      return offlineComment;
+    }
+
     try {
       const res = await api.post(`/comments/${video._id}`, { content: text, parentComment });
       const newCommentData = res.data.data;
@@ -274,6 +606,19 @@ export default function VideoPlayer() {
         ? Math.max(0, (prev.likesCount || 0) - 1)
         : (prev.likesCount || 0) + 1
     }));
+
+    if (!navigator.onLine) {
+      const queue = JSON.parse(localStorage.getItem('caffevibes-offline-actions') || '[]');
+      queue.push({
+        url: `/likes/toggle/v/${video._id}`,
+        method: 'POST',
+        body: {}
+      });
+      localStorage.setItem('caffevibes-offline-actions', JSON.stringify(queue));
+      toast.success("Video liked offline! Queued for auto-sync ☕", { icon: '📝' });
+      return;
+    }
+
     try {
       await api.post(`/likes/toggle/v/${video._id}`);
     } catch (e) {
@@ -289,11 +634,34 @@ export default function VideoPlayer() {
   };
   const handleDislike = async () => {
     if (!currentUser) return toast.error('Login to dislike');
+    const wasDisliked = isDisliked;
+    setIsDisliked(!wasDisliked);
+    if (!wasDisliked && isLiked) {
+      setIsLiked(false);
+      setVideo(prev => ({
+        ...prev,
+        likesCount: Math.max(0, (prev.likesCount || 0) - 1)
+      }));
+    }
+
+    if (!navigator.onLine) {
+      const queue = JSON.parse(localStorage.getItem('caffevibes-offline-actions') || '[]');
+      queue.push({
+        url: `/dislikes/toggle/v/${video._id}`,
+        method: 'POST',
+        body: {}
+      });
+      localStorage.setItem('caffevibes-offline-actions', JSON.stringify(queue));
+      toast.success("Video disliked offline! Queued for auto-sync ☕", { icon: '📝' });
+      return;
+    }
+
     try {
       await api.post(`/dislikes/toggle/v/${video._id}`);
-      setIsDisliked(!isDisliked);
-      if (isLiked) setIsLiked(false);
-    } catch (e) { toast.error('Failed to dislike'); }
+    } catch (e) {
+      setIsDisliked(wasDisliked);
+      toast.error('Failed to dislike');
+    }
   };
   const handleSubscribe = async () => {
     if (!currentUser) return toast.error('Please log in to subscribe');
@@ -305,6 +673,11 @@ export default function VideoPlayer() {
       setIsSubscribed(data.isSubscribed);
       setVideo(prev => ({ ...prev, owner: { ...prev.owner, subscribersCount: data.subscribersCount } }));
       toast.success(data.isSubscribed ? 'Subscribed!' : 'Unsubscribed');
+      if (data.isSubscribed) {
+        window.dispatchEvent(new CustomEvent('caffevibes-milestone-reached', {
+          detail: { milestone: 'confetti-only' }
+        }));
+      }
     } catch (e) {
       toast.error('Failed to subscribe');
     } finally {
@@ -355,14 +728,243 @@ export default function VideoPlayer() {
       setIsSavingVideo(false);
     }
   };
-  if (isLoading) return <div className="w-full h-screen flex items-center justify-center"><Loader2 className="animate-spin text-primary" size={32} /></div>;
+  if (isLoading) return <SkeletonLoader variant="videoplayer" />;
   if (!video) return <div className="w-full mt-10"><EmptyState type="error" /></div>;
   const topLevelComments = comments.filter(c => !c.parentComment);
   return (
     <div className="animate-fade-in pb-12 w-full max-w-7xl mx-auto">
-      <div className="w-full aspect-video bg-black rounded-xl md:rounded-2xl overflow-hidden shadow-2xl mb-6">
-        <video src={video.videoFile} controls className="w-full h-full object-contain" poster={video.thumbnail} />
-      </div>
+      <motion.div 
+        ref={playerContainerRef}
+        layoutId={`video-thumbnail-${id}`}
+        onMouseMove={handleMouseMoveControls}
+        onMouseLeave={() => setShowControls(false)}
+        className="w-full aspect-video bg-black rounded-xl md:rounded-2xl overflow-hidden shadow-2xl mb-6 relative group select-none"
+      >
+        {/* Video Element */}
+        <video 
+          ref={videoRef}
+          src={video.videoFile} 
+          className="w-full h-full object-contain cursor-pointer" 
+          poster={video.thumbnail}
+          onClick={togglePlay}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+        />
+
+        {/* Center Hover Play/Pause Overlay */}
+        <div 
+          onClick={togglePlay}
+          className={`absolute inset-0 flex items-center justify-center cursor-pointer transition-opacity duration-300 ${!isPlaying ? 'bg-black/45' : 'bg-transparent opacity-0 group-hover:opacity-100'}`}
+        >
+          <motion.div
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-primary/95 text-background flex items-center justify-center shadow-3xl backdrop-blur-sm border border-primary/20"
+          >
+            {isPlaying ? (
+              <Pause size={28} fill="currentColor" className="text-background" />
+            ) : (
+              <Play size={28} fill="currentColor" className="text-background translate-x-0.5" />
+            )}
+          </motion.div>
+        </div>
+
+        {/* Custom Video Controls Bar */}
+        <div 
+          className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-12 pb-4 px-4 flex flex-col gap-3 transition-opacity duration-300 z-20 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        >
+          {/* Custom Progress Bar / Timeline */}
+          <div className="flex flex-col gap-1 relative">
+            <div 
+              onClick={handleTimelineClick}
+              onMouseMove={handleTimelineHover}
+              onMouseLeave={() => setHoverChapter(null)}
+              className="relative h-1.5 sm:h-2 bg-white/20 rounded-full cursor-pointer hover:h-2.5 transition-all duration-200 group/timeline flex items-center"
+            >
+              {/* Progress Played Fill */}
+              <div 
+                className="absolute left-0 top-0 h-full bg-primary rounded-full" 
+                style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
+              />
+
+              {/* Chapter dots */}
+              {chapters.map((ch, index) => {
+                const percent = (ch.seconds / (duration || 1)) * 100;
+                return (
+                  <div
+                    key={index}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      jumpToChapter(ch.seconds);
+                    }}
+                    className="absolute w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-white border border-primary hover:bg-primary-hover hover:scale-150 transition-all duration-150 cursor-pointer -translate-x-1/2"
+                    style={{ left: `${percent}%` }}
+                  />
+                );
+              })}
+
+              {/* Playhead Handle */}
+              <div 
+                className="absolute w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full bg-primary border-2 border-white opacity-0 group-hover/timeline:opacity-100 transition-opacity -translate-x-1/2"
+                style={{ left: `${(currentTime / (duration || 1)) * 100}%` }}
+              />
+            </div>
+
+            {/* Hover Chapter Tooltip */}
+            {hoverChapter && (
+              <div 
+                className="absolute bottom-7 bg-surface/95 backdrop-blur-md border border-surface-hover/80 text-[10px] text-text-main font-bold px-2.5 py-1.5 rounded-xl shadow-2xl -translate-x-1/2 z-30 animate-fade-in pointer-events-none flex flex-col items-center gap-0.5"
+                style={{ left: `${hoverChapter.percent}%` }}
+              >
+                <span className="text-primary truncate max-w-[120px]">{hoverChapter.title}</span>
+                <span className="text-text-muted/60 font-mono">{formatTime(hoverChapter.seconds)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Action Row */}
+          <div className="flex items-center justify-between">
+            {/* Left Controls */}
+            <div className="flex items-center gap-4">
+              {/* Play / Pause Toggle */}
+              <button 
+                onClick={togglePlay}
+                className="text-text-main hover:text-primary transition-colors p-1"
+              >
+                {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+
+              {/* Mute & Volume Bar */}
+              <div className="flex items-center gap-1.5 group/volume p-1">
+                <button 
+                  onClick={toggleMute}
+                  className="text-text-main hover:text-primary transition-colors"
+                >
+                  {isMuted || volume === 0 ? (
+                    <VolumeX size={18} />
+                  ) : volume < 0.5 ? (
+                    <Volume1 size={18} />
+                  ) : (
+                    <Volume2 size={18} />
+                  )}
+                </button>
+                <input 
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="w-12 sm:w-16 h-1 rounded-full cursor-pointer bg-white/20 accent-primary group-hover/volume:w-20 transition-all duration-300"
+                />
+              </div>
+
+              {/* Elapsed Time / Total Time */}
+              <span className="text-[11px] sm:text-xs font-mono text-text-main/80 select-none">
+                {formatTime(currentTime)} <span className="text-text-muted/40">/</span> {formatTime(duration)}
+              </span>
+            </div>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-4">
+              {/* Active Chapter Label */}
+              {currentChapter && (
+                <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 max-w-[160px] truncate">
+                  <span className="animate-pulse">📍</span> {currentChapter.title}
+                </span>
+              )}
+
+              {/* PiP Button */}
+              <button 
+                onClick={togglePiP}
+                className="text-text-main hover:text-primary transition-colors p-1 relative group/pip"
+              >
+                <ExternalLink size={18} />
+                <span className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-surface border border-surface-hover text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded shadow-xl opacity-0 group-hover/pip:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                  Picture in Picture
+                </span>
+              </button>
+
+              {/* Quality Settings Toggler */}
+              <div className="relative">
+                <button 
+                  onClick={() => setShowQualityMenu(!showQualityMenu)}
+                  className="flex items-center gap-1.5 text-text-main hover:text-primary transition-colors p-1"
+                >
+                  <Settings size={18} className={showQualityMenu ? 'rotate-45 transition-transform duration-300' : 'transition-transform duration-300'} />
+                  <span className="text-[9px] font-black uppercase bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/20 select-none">{activeQuality}</span>
+                </button>
+
+                {showQualityMenu && (
+                  <div className="absolute right-0 bottom-8 bg-surface border border-surface-hover rounded-xl shadow-2xl py-1.5 min-w-[100px] z-50 animate-fade-in flex flex-col">
+                    {['Auto', '1080p', '720p', '360p', '144p'].map((q) => (
+                      <button 
+                        key={q} 
+                        onClick={() => changeQuality(q)} 
+                        className={`w-full text-left px-4 py-2 text-[10px] font-black uppercase tracking-widest ${activeQuality === q ? 'text-primary bg-primary/10' : 'text-text-muted hover:text-text-main hover:bg-surface-hover'}`}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Fullscreen Button */}
+              <button 
+                onClick={toggleFullscreen}
+                className="text-text-main hover:text-primary transition-colors p-1"
+              >
+                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Keyboard Shortcuts Overlay (Glassmorphism, bottom-left) */}
+        <AnimatePresence>
+          {showShortcuts && (
+            <motion.div 
+              initial={{ opacity: 0, x: -20, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -20, scale: 0.95 }}
+              className="absolute bottom-20 sm:bottom-24 left-4 bg-surface/75 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-3xl z-40 max-w-[240px] pointer-events-none"
+            >
+              <div className="flex flex-col gap-2">
+                <h4 className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-1">Keyboard Shortcuts</h4>
+                <div className="flex flex-col gap-1.5 text-[10px] font-bold uppercase tracking-wider text-text-main/90">
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Play / Pause</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">Space</kbd>
+                  </div>
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Mute Toggle</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">M</kbd>
+                  </div>
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Fullscreen</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">F</kbd>
+                  </div>
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Seek 5s</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">← →</kbd>
+                  </div>
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Volume 10%</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">↑ ↓</kbd>
+                  </div>
+                  <div className="flex justify-between items-center gap-6">
+                    <span className="text-text-muted/60">Show Guide</span>
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/15 text-[8px] font-mono">K or ?</kbd>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
       <div className="px-2 md:px-0">
         <h1 className="text-2xl md:text-3xl font-display font-bold text-text-main mb-4 leading-tight">
           {video.title}

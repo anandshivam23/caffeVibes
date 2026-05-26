@@ -1,0 +1,52 @@
+{
+  "short_name": "CaffeVibes",
+  "name": "CaffeVibes - Share Your Morning Vibe",
+  "description": "Daily coffee streaks, dynamic achievements, dynamic videos, jokes, and real-time morning vibes.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1C1311",
+  "theme_color": "#D4A373",
+  "display": "standalone",
+  "orientation": "portrait",
+  "shortcuts": [
+    {
+      "name": "View Feed",
+      "short_name": "Feed",
+      "description": "See the latest video and tweet vibes",
+      "url": "/",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Compose Post",
+      "short_name": "Compose",
+      "description": "Share a morning coffee vibe",
+      "url": "/?compose=true",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "My Profile",
+      "short_name": "Profile",
+      "description": "View your streaks and badges",
+      "url": "/profile/me",
+      "icons": [{ "src": "/favicon.svg", "sizes": "192x192" }]
+    }
+  ]
+}
