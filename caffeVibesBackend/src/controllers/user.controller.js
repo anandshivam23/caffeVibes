@@ -42,6 +42,17 @@ const cookieOptions = {
     sameSite: "None",
 }
 
+const accessTokenCookieOptions = {
+    ...cookieOptions,
+    maxAge: 1 * 24 * 60 * 60 * 1000,
+}
+
+const refreshTokenCookieOptions = {
+    ...cookieOptions,
+    maxAge: 10 * 24 * 60 * 60 * 1000,
+}
+
+
 const registerUser = asyncHandler(async (req, res) => {
     const { fullName, email, username, password } = req.body
 
@@ -140,8 +151,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
     return res
         .status(200)
-        .cookie("accessToken", accessToken, cookieOptions)
-        .cookie("refreshToken", refreshToken, cookieOptions)
+        .cookie("accessToken", accessToken, accessTokenCookieOptions)
+        .cookie("refreshToken", refreshToken, refreshTokenCookieOptions)
         .json(
             new ApiResponse(
                 200,
@@ -166,7 +177,7 @@ const logoutUser = asyncHandler(async (req, res) => {
 })
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
-    const incomingRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken
+    const incomingRefreshToken = req.body?.refreshToken || req.cookies?.refreshToken
 
     if (!incomingRefreshToken) {
         throw new ApiError(401, "Unauthorized: no refresh token provided")
@@ -192,8 +203,8 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
         return res
             .status(200)
-            .cookie("accessToken", accessToken, cookieOptions)
-            .cookie("refreshToken", newRefreshToken, cookieOptions)
+            .cookie("accessToken", accessToken, accessTokenCookieOptions)
+            .cookie("refreshToken", newRefreshToken, refreshTokenCookieOptions)
             .json(
                 new ApiResponse(
                     200,

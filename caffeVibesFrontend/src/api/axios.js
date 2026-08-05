@@ -33,12 +33,12 @@ api.interceptors.request.use((config) => {
 let isRefreshing = false;
 let failedQueue = [];
 
-const processQueue = (error) => {
+const processQueue = (error, token = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.reject(error);
     } else {
-      prom.resolve();
+      prom.resolve(token);
     }
   });
   failedQueue = [];
@@ -48,19 +48,32 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (originalRequest?.url?.includes('/users/refresh-token')) {
+
+    if (!originalRequest) {
       return Promise.reject(error);
     }
+
+    if (originalRequest.url?.includes('/users/refresh-token')) {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
-          .then(() => api(originalRequest))
+          .then((token) => {
+            if (token && originalRequest.headers) {
+              originalRequest.headers['Authorization'] = `Bearer ${token}`;
+            }
+            return api(originalRequest);
+          })
           .catch((err) => Promise.reject(err));
       }
+
       originalRequest._retry = true;
       isRefreshing = true;
+
       try {
         // Send refreshToken in body as fallback for cookie-blocked browsers
         const storedRefreshToken = getRefreshToken();
@@ -69,16 +82,22 @@ api.interceptors.response.use(
         );
         // Save new tokens if returned in response body
         const newTokens = refreshRes.data?.data;
-        if (newTokens?.accessToken) {
+        const newAccessToken = newTokens?.accessToken;
+
+        if (newAccessToken) {
           saveTokens({
-            accessToken: newTokens.accessToken,
+            accessToken: newAccessToken,
             refreshToken: newTokens.refreshToken,
           });
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
+          }
         }
-        processQueue(null);
+
+        processQueue(null, newAccessToken);
         return api(originalRequest);
       } catch (refreshError) {
-        processQueue(refreshError);
+        processQueue(refreshError, null);
         clearTokens();
         emitAuthFailure();
         return Promise.reject(refreshError);

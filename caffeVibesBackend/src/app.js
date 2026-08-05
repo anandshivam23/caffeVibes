@@ -3,18 +3,51 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import { createServer } from "http"
 import { Server } from "socket.io"
+import jwt from "jsonwebtoken"
 
 const app = express()
 const server = createServer(app)
 
+const allowedOrigins = [
+    process.env.CORS_ORIGIN,
+    "https://caffevibes.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000"
+].filter(Boolean)
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin) || allowedOrigins.length === 0) {
+            callback(null, true);
+        } else {
+            callback(null, true);
+        }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+}
+
 const io = new Server(server, {
     cors: {
-        origin: "https://caffevibes.vercel.app",
+        origin: allowedOrigins.length > 0 ? allowedOrigins : "https://caffevibes.vercel.app",
         credentials: true,
         methods: ["GET", "POST"]
     }
 })
 
+io.use((socket, next) => {
+    try {
+        const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace("Bearer ", "");
+        if (token) {
+            const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+            socket.user = decoded;
+        }
+    } catch (_err) {
+        // Socket authentication optional, proceed without user if invalid
+    }
+    next();
+});
 
 app.use((req, res, next) => {
     req.io = io
@@ -27,13 +60,6 @@ io.on("connection", (socket) => {
         console.log("Socket disconnected:", socket.id)
     })
 })
-
-const corsOptions = {
-    origin: "https://caffevibes.vercel.app",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-}
 
 app.use(cors(corsOptions))
 app.options("*", cors(corsOptions))
